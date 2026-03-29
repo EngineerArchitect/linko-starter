@@ -12,6 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	pkgerr "github.com/pkg/errors"
+
+	"boot.dev/linko/internal/linkoerr"
 	"boot.dev/linko/internal/store"
 )
 
@@ -71,7 +74,8 @@ type closeFunc func() error
 func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 	handlers := []slog.Handler{
 		slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level:       slog.LevelDebug,
+			ReplaceAttr: replaceAttr,
 		}),
 	}
 	closers := []closeFunc{}
@@ -92,7 +96,8 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 			return nil
 		}
 		handlers = append(handlers, slog.NewJSONHandler(bufferedFile, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level:       slog.LevelInfo,
+			ReplaceAttr: replaceAttr,
 		}))
 		closers = append(closers, close)
 	}
@@ -106,4 +111,48 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 		return errors.Join(errs...)
 	}
 	return slog.New(slog.NewMultiHandler(handlers...)), closer, nil
+}
+
+type stackTracer interface {
+	error
+	StackTrace() pkgerr.StackTrace
+}
+
+type multiError interface {
+	error
+	Unwrap() []error
+}
+
+func errorAttrs(err error) []slog.Attr {
+	attrs := []slog.Attr{
+		{Key: "message", Value: slog.StringValue(err.Error())},
+	}
+	attrs = append(attrs, linkoerr.Attrs(err)...)
+	if stackErr, ok := errors.AsType[stackTracer](err); ok {
+		attrs = append(attrs, slog.Attr{
+			Key:   "stack_trace",
+			Value: slog.StringValue(fmt.Sprintf("%+v", stackErr.StackTrace())),
+		})
+	}
+	return attrs
+}
+
+func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == "error" {
+		err, ok := a.Value.Any().(error)
+		if !ok {
+			return a
+		}
+
+		if multiErr, ok := errors.AsType[multiError](err); ok {
+			var errAttrs []slog.Attr
+			for i, e := range multiErr.Unwrap() {
+				errAttrs = append(errAttrs, slog.GroupAttrs(fmt.Sprintf("error_%d", i+1), errorAttrs(e)...))
+			}
+			return slog.GroupAttrs("errors", errAttrs...)
+		}
+
+		return slog.GroupAttrs("error", errorAttrs(err)...)
+	}
+	return a
 }
