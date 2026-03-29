@@ -47,6 +47,9 @@ func (s *server) start() error {
 	if err != nil {
 		return err
 	}
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		logger.Printf("Linko is running on http://localhost:%d\n", tcpAddr.Port)
+	}
 	if err := s.httpServer.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
