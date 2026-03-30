@@ -19,7 +19,7 @@ type server struct {
 	cancel     context.CancelFunc
 }
 
-func newServer(store store.Store, port int, cancel context.CancelFunc) *server {
+func newServer(store store.Store, port int, logger *log.Logger, cancel context.CancelFunc) *server {
 	mux := http.NewServeMux()
 
 	s := &server{
@@ -49,9 +49,7 @@ func (s *server) start() error {
 	if err != nil {
 		return err
 	}
-	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
-		logger.Printf("Linko is running on http://localhost:%d\n", tcpAddr.Port)
-	}
+	s.logger.Printf("Linko is running on http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
 	if err := s.httpServer.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
